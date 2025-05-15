@@ -11,3 +11,9 @@ sentence-transformers
 python-dotenv
 arxiv
 semanticscholar
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-core>=0.1.0
+langchain-google-genai>=0.0.5
+pypdf
+chromadb

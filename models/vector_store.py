@@ -1,80 +1,62 @@
 import os
+import logging
+from typing import List, Dict, Any, Optional
+
+# LangChain imports
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+
+# Keep compatibility with existing code
 import numpy as np
 import faiss
 import pickle
-from sentence_transformers import SentenceTransformer
-import logging
 
 
 class VectorStore:
-    def __init__(self, index_path="../data/faiss_index", metadata_path="../data/metadata.pkl", model_name="all-MiniLM-L6-v2"):
-        """Initialize the vector store."""
-        self.index_path = index_path
-        self.metadata_path = metadata_path
+    def __init__(self, persist_directory="../data/chroma_db", embedding_model_name="all-MiniLM-L6-v2"):
+        """Initialize the LangChain-based vector store."""
+        self.persist_directory = persist_directory
 
-        # Ensure directories exist
-        os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
-        os.makedirs(os.path.dirname(self.metadata_path), exist_ok=True)
+        # Ensure directory exists
+        os.makedirs(self.persist_directory, exist_ok=True)
 
-        # Initialize the embedding model (lightweight for Raspberry Pi)
+        # For backward compatibility
+        self.index_path = "../data/faiss_index"
+        self.metadata_path = "../data/metadata.pkl"
+
         try:
-            self.model = SentenceTransformer(model_name)
-            self.dimension = self.model.get_sentence_embedding_dimension()
+            # Initialize embeddings model
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=embedding_model_name)
+
+            # Initialize or load Chroma vector store
+            self.db = Chroma(
+                persist_directory=self.persist_directory,
+                embedding_function=self.embeddings
+            )
+            logging.info(
+                f"Initialized Chroma vector store with {len(self.db.get()['ids'])} documents")
         except Exception as e:
-            logging.error(f"Error loading model: {e}")
-            # Fallback dimension if model fails to load
-            self.dimension = 384
+            logging.error(f"Error initializing vector store: {e}")
+            self.db = None
 
-        # Initialize or load FAISS index
-        self._initialize_index()
+        # Load legacy data if it exists for migration purposes
+        self.legacy_metadata = self._load_legacy_metadata()
 
-        # Initialize or load metadata
-        self.metadata = self._load_metadata()
-
-    def _initialize_index(self):
-        """Initialize or load a FAISS index."""
-        if os.path.exists(self.index_path):
-            try:
-                self.index = faiss.read_index(self.index_path)
-                logging.info(
-                    f"Loaded existing index with {self.index.ntotal} entries")
-            except Exception as e:
-                logging.error(f"Error loading index: {e}")
-                self.index = faiss.IndexFlatL2(self.dimension)
-        else:
-            self.index = faiss.IndexFlatL2(self.dimension)
-            logging.info("Created new FAISS index")
-
-    def _load_metadata(self):
-        """Load metadata dictionary."""
+    def _load_legacy_metadata(self):
+        """Load legacy metadata for migration purposes."""
         if os.path.exists(self.metadata_path):
             try:
                 with open(self.metadata_path, 'rb') as f:
                     return pickle.load(f)
             except Exception as e:
-                logging.error(f"Error loading metadata: {e}")
-                return {}
-        else:
-            return {}
+                logging.error(f"Error loading legacy metadata: {e}")
+        return {}
 
-    def _save_index(self):
-        """Save the FAISS index to disk."""
-        try:
-            faiss.write_index(self.index, self.index_path)
-        except Exception as e:
-            logging.error(f"Error saving index: {e}")
-
-    def _save_metadata(self):
-        """Save metadata to disk."""
-        try:
-            with open(self.metadata_path, 'wb') as f:
-                pickle.dump(self.metadata, f)
-        except Exception as e:
-            logging.error(f"Error saving metadata: {e}")
-
-    def add_document(self, doc_id, text, paper_info=None):
+    def add_document(self, doc_id: str, text: str, paper_info: Optional[Dict] = None) -> tuple:
         """
-        Add a document to the vector store.
+        Add a document to the vector store using LangChain.
 
         Args:
             doc_id: Unique identifier for the document
@@ -82,67 +64,87 @@ class VectorStore:
             paper_info: Associated paper metadata
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, id)
         """
         try:
-            # Create embedding
-            vector = self.model.encode([text])[0]
-            vector = np.array([vector]).astype('float32')
+            if not self.db:
+                raise ValueError("Vector store not initialized")
 
-            # Add to FAISS index
-            self.index.add(vector)
-            vector_id = self.index.ntotal - 1
+            # Create LangChain document
+            metadata = {"doc_id": doc_id}
+            if paper_info:
+                metadata.update(paper_info)
 
-            # Store mapping and metadata
-            self.metadata[vector_id] = {
-                'doc_id': doc_id,
-                'paper_info': paper_info
-            }
+            document = Document(
+                page_content=text,
+                metadata=metadata
+            )
 
-            # Save changes
-            self._save_index()
-            self._save_metadata()
+            # Add to vector store
+            ids = self.db.add_documents([document], ids=[str(doc_id)])
+            self.db.persist()  # Persist changes
 
-            return True, vector_id
+            return True, ids[0]
         except Exception as e:
-            logging.error(f"Error adding document: {e}")
+            logging.error(f"Error adding document to vector store: {e}")
             return False, None
 
-    def search(self, query, k=5):
+    def search(self, query: str, k: int = 5) -> List[Dict]:
         """
-        Search for similar documents.
+        Search for similar documents using LangChain.
 
         Args:
             query: Search query text
             k: Number of results to return
 
         Returns:
-            List of document IDs and scores
+            List of document data and scores
         """
-        if self.index.ntotal == 0:
-            return []
-
         try:
-            # Encode query
-            query_vector = self.model.encode([query])[0]
-            query_vector = np.array([query_vector]).astype('float32')
+            if not self.db:
+                raise ValueError("Vector store not initialized")
 
-            # Search index
-            k = min(k, self.index.ntotal)
-            distances, indices = self.index.search(query_vector, k)
+            # Search using LangChain
+            results = self.db.similarity_search_with_score(query, k=k)
 
             # Format results
-            results = []
-            for i, idx in enumerate(indices[0]):
-                if idx >= 0:  # Valid index
-                    doc_data = self.metadata.get(int(idx), {})
-                    results.append({
-                        'doc_id': doc_data.get('doc_id'),
-                        'paper_info': doc_data.get('paper_info'),
-                        'score': float(distances[0][i])
-                    })
+            formatted_results = []
+            for doc, score in results:
+                doc_id = doc.metadata.get("doc_id")
+                formatted_results.append({
+                    "doc_id": doc_id,
+                    "paper_info": {k: v for k, v in doc.metadata.items() if k != "doc_id"},
+                    "score": float(score)
+                })
 
-            return results
+            return formatted_results
         except Exception as e:
             logging.error(f"Error during search: {e}")
+            return []
+
+    def add_documents(self, documents: List[Document]) -> List[str]:
+        """
+        Add multiple LangChain documents to the vector store.
+
+        Args:
+            documents: List of LangChain Document objects
+
+        Returns:
+            List of document IDs
+        """
+        try:
+            if not self.db:
+                raise ValueError("Vector store not initialized")
+
+            # Generate IDs if not present in metadata
+            ids = [str(doc.metadata.get("doc_id", i))
+                   for i, doc in enumerate(documents)]
+
+            # Add documents to vector store
+            self.db.add_documents(documents, ids=ids)
+            self.db.persist()  # Persist changes
+
+            return ids
+        except Exception as e:
+            logging.error(f"Error adding documents to vector store: {e}")
             return []

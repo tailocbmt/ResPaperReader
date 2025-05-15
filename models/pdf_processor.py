@@ -1,8 +1,15 @@
 import os
-import pdfplumber
 import logging
 import re
 from datetime import datetime
+from typing import Dict, List, Optional
+
+# LangChain imports
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.documents import Document
+
+# Keep pdfplumber for backward compatibility
+import pdfplumber
 
 
 class PDFProcessor:
@@ -36,9 +43,9 @@ class PDFProcessor:
             logging.error(f"Error saving PDF: {e}")
             return None
 
-    def extract_metadata(self, file_path):
+    def extract_metadata(self, file_path: str) -> Dict:
         """
-        Extract title, abstract, and authors from a PDF file.
+        Extract title, abstract, and authors from a PDF file using LangChain.
 
         Args:
             file_path: Path to the PDF file
@@ -47,37 +54,39 @@ class PDFProcessor:
             Dict containing title, abstract, and authors
         """
         try:
-            with pdfplumber.open(file_path) as pdf:
-                # Extract text from first few pages (typically where metadata is found)
-                text = ""
-                for i in range(min(2, len(pdf.pages))):
-                    text += pdf.pages[i].extract_text() + "\n"
+            # Use LangChain's PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            documents = loader.load()
 
-                # Extract title (assume first line with significant text)
-                lines = [line.strip()
-                         for line in text.split('\n') if line.strip()]
-                title = lines[0] if lines else "Unknown Title"
+            # Get text from the first 2 pages which typically contain metadata
+            text = ""
+            for doc in documents[:2]:
+                text += doc.page_content + "\n"
 
-                # Look for abstract section
-                abstract = ""
-                abstract_match = re.search(
-                    r'(?:Abstract|ABSTRACT)[\s\.\:\-]*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z][a-z])', text, re.IGNORECASE)
-                if abstract_match:
-                    abstract = abstract_match.group(1).strip()
+            # Extract title (assume first line with significant text)
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            title = lines[0] if lines else "Unknown Title"
 
-                # Extract author information
-                authors = []
-                author_section = re.search(
-                    r'(?:^|\n)([^,\n]+(?:,\s*[^,\n]+)*)\n(?:[^@\n]*@[^@\n]*|[Aa]bstract)', text)
-                if author_section:
-                    author_text = author_section.group(1).strip()
-                    authors = [a.strip() for a in author_text.split(',')]
+            # Look for abstract section
+            abstract = ""
+            abstract_match = re.search(
+                r'(?:Abstract|ABSTRACT)[\s\.\:\-]*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z][a-z])', text, re.IGNORECASE)
+            if abstract_match:
+                abstract = abstract_match.group(1).strip()
 
-                return {
-                    "title": title,
-                    "abstract": abstract,
-                    "authors": authors
-                }
+            # Extract author information
+            authors = []
+            author_section = re.search(
+                r'(?:^|\n)([^,\n]+(?:,\s*[^,\n]+)*)\n(?:[^@\n]*@[^@\n]*|[Aa]bstract)', text)
+            if author_section:
+                author_text = author_section.group(1).strip()
+                authors = [a.strip() for a in author_text.split(',')]
+
+            return {
+                "title": title,
+                "abstract": abstract,
+                "authors": authors
+            }
         except Exception as e:
             logging.error(f"Error extracting metadata from PDF: {e}")
             return {
@@ -86,9 +95,9 @@ class PDFProcessor:
                 "authors": []
             }
 
-    def extract_full_text(self, file_path):
+    def extract_full_text(self, file_path: str) -> str:
         """
-        Extract full text from a PDF.
+        Extract full text from a PDF using LangChain.
 
         Args:
             file_path: Path to the PDF file
@@ -97,11 +106,31 @@ class PDFProcessor:
             Full text content of the PDF
         """
         try:
-            with pdfplumber.open(file_path) as pdf:
-                text = ""
-                for page in pdf.pages:
-                    text += page.extract_text() + "\n\n"
-                return text
+            # Use LangChain's PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            documents = loader.load()
+
+            # Combine text from all documents/pages
+            text = "\n\n".join([doc.page_content for doc in documents])
+            return text
         except Exception as e:
             logging.error(f"Error extracting full text: {e}")
             return ""
+
+    def extract_documents(self, file_path: str) -> List[Document]:
+        """
+        Extract pages as LangChain Documents from a PDF.
+
+        Args:
+            file_path: Path to the PDF file
+
+        Returns:
+            List of LangChain Document objects
+        """
+        try:
+            loader = PyPDFLoader(file_path)
+            return loader.load()
+        except Exception as e:
+            logging.error(
+                f"Error loading document as LangChain Documents: {e}")
+            return []

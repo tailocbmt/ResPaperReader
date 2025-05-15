@@ -1,29 +1,39 @@
-import google.generativeai as genai
 import os
 import json
 import logging
 from typing import List, Dict, Any
 
+# LangChain imports
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from langchain.agents import Tool, create_structured_chat_agent
+from langchain.agents.agent import AgentExecutor
+
 
 class GeminiAgent:
     def __init__(self, api_key=None):
-        """Initialize the Gemini agent with API key."""
+        """Initialize the Gemini agent with API key using LangChain."""
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         self.configure()
         self.conversation_history = []
         self.available_tools = self._define_tools()
 
     def configure(self):
-        """Configure the Gemini API."""
+        """Configure the LangChain Gemini integration."""
         try:
-            genai.configure(api_key=self.api_key)
-            # Updated to use gemini-2.0-flash instead of gemini-pro
-            self.model = genai.GenerativeModel('gemini-2.0-flash')
+            os.environ["GOOGLE_API_KEY"] = self.api_key
+            # Using LangChain's wrapper for Gemini
+            self.llm = ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash", temperature=0.2)
+            self.output_parser = StrOutputParser()
             logging.info(
-                "Successfully configured Gemini API with model: gemini-2.0-flash")
+                "Successfully configured Gemini API via LangChain with model: gemini-2.0-flash")
         except Exception as e:
-            logging.error(f"Error configuring Gemini API: {e}")
-            self.model = None
+            logging.error(f"Error configuring Gemini API via LangChain: {e}")
+            self.llm = None
 
     def _define_tools(self):
         """Define the available tools for the agent."""
@@ -76,7 +86,7 @@ If you need to use a tool, output it in the format: <tool>tool_name(parameters)<
 
     def analyze_paper(self, title, abstract, full_text=None):
         """
-        Analyze a research paper and extract key information.
+        Analyze a research paper and extract key information using LangChain.
 
         Args:
             title: Paper title
@@ -86,10 +96,13 @@ If you need to use a tool, output it in the format: <tool>tool_name(parameters)<
         Returns:
             Dict with analysis results
         """
-        if not self.model or not self.api_key:
+        if not self.llm or not self.api_key:
             return {"error": "Gemini API not configured"}
 
-        prompt = f"""Analyze the following research paper and extract key information:
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(
+                content="You are a research paper analysis assistant that extracts key information from papers."),
+            HumanMessage(content=f"""Analyze the following research paper and extract key information:
 Title: {title}
 
 Abstract: {abstract}
@@ -101,12 +114,14 @@ Please provide:
 4. 3-5 keywords
 
 Format your response as a structured report.
-"""
+""")
+        ])
 
         try:
-            response = self.model.generate_content(prompt)
+            chain = prompt | self.llm | self.output_parser
+            analysis = chain.invoke({})
             return {
-                "analysis": response.text,
+                "analysis": analysis,
                 "title": title
             }
         except Exception as e:
@@ -115,7 +130,7 @@ Format your response as a structured report.
 
     def compare_papers(self, paper1, paper2):
         """
-        Compare two research papers and generate a structured report.
+        Compare two research papers and generate a structured report using LangChain.
 
         Args:
             paper1: Dict containing first paper metadata
@@ -124,10 +139,13 @@ Format your response as a structured report.
         Returns:
             Comparison report
         """
-        if not self.model or not self.api_key:
+        if not self.llm or not self.api_key:
             return "Gemini API not configured. Please add your API key."
 
-        prompt = f"""Compare the following two research papers:
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(
+                content="You are a research paper comparison assistant."),
+            HumanMessage(content=f"""Compare the following two research papers:
 
 Paper 1:
 Title: {paper1.get('title', 'Unknown')}
@@ -146,18 +164,19 @@ Please provide a structured comparison including:
 6. Major differences
 
 Format your response as a structured report with clear headings and bullet points.
-"""
+""")
+        ])
 
         try:
-            response = self.model.generate_content(prompt)
-            return response.text
+            chain = prompt | self.llm | self.output_parser
+            return chain.invoke({})
         except Exception as e:
             logging.error(f"Error generating paper comparison: {e}")
             return f"Failed to generate comparison: {str(e)}"
 
     def process_query(self, query, context=None):
         """
-        Process a user query using the ReAct approach.
+        Process a user query using LangChain.
 
         Args:
             query: User's natural language query
@@ -166,30 +185,30 @@ Format your response as a structured report with clear headings and bullet point
         Returns:
             Response from the agent
         """
-        if not self.model or not self.api_key:
+        if not self.llm or not self.api_key:
             return "Gemini API not configured. Please add your API key."
 
         context_str = ""
         if context:
             context_str = f"\nAdditional context:\n{json.dumps(context, indent=2)}"
 
-        prompt = f"""{self.get_system_prompt()}
-
-User query: {query}{context_str}
-
-Based on this query, what action should be taken and what information should be provided?
-"""
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=self.get_system_prompt()),
+            HumanMessage(
+                content=f"User query: {query}{context_str}\n\nBased on this query, what action should be taken and what information should be provided?")
+        ])
 
         try:
-            response = self.model.generate_content(prompt)
+            chain = prompt | self.llm | self.output_parser
+            response = chain.invoke({})
 
             # Add to conversation history
             self.conversation_history.append({
                 "user": query,
-                "assistant": response.text
+                "assistant": response
             })
 
-            return response.text
+            return response
         except Exception as e:
             logging.error(f"Error processing query: {e}")
             return f"I encountered an error: {str(e)}"
