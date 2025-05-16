@@ -3,6 +3,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Dict, List, Optional
+import os.path
 
 # LangChain imports
 from langchain_community.document_loaders import PyPDFLoader
@@ -13,9 +14,17 @@ import pdfplumber
 
 
 class PDFProcessor:
-    def __init__(self, upload_dir="../data/uploads"):
+    def __init__(self, upload_dir=None):
         """Initialize PDF processor with upload directory."""
-        self.upload_dir = upload_dir
+        if upload_dir is None:
+            # Use absolute path for consistency
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))
+            self.upload_dir = os.path.join(base_dir, "data", "uploads")
+        else:
+            self.upload_dir = upload_dir
+
+        logging.info(f"PDF uploads directory set to: {self.upload_dir}")
         os.makedirs(self.upload_dir, exist_ok=True)
 
     def save_pdf(self, pdf_file):

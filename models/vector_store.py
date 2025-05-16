@@ -14,16 +14,27 @@ import pickle
 
 
 class VectorStore:
-    def __init__(self, persist_directory="../data/chroma_db", embedding_model_name="all-MiniLM-L6-v2"):
+    def __init__(self, persist_directory=None, embedding_model_name="all-MiniLM-L6-v2"):
         """Initialize the LangChain-based vector store."""
-        self.persist_directory = persist_directory
+        if persist_directory is None:
+            # Use absolute path for consistency
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))
+            self.persist_directory = os.path.join(
+                base_dir, "data", "chroma_db")
+        else:
+            self.persist_directory = persist_directory
+
+        logging.info(
+            f"Vector store directory set to: {self.persist_directory}")
 
         # Ensure directory exists
         os.makedirs(self.persist_directory, exist_ok=True)
 
         # For backward compatibility
-        self.index_path = "../data/faiss_index"
-        self.metadata_path = "../data/metadata.pkl"
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.index_path = os.path.join(base_dir, "data", "faiss_index")
+        self.metadata_path = os.path.join(base_dir, "data", "metadata.pkl")
 
         try:
             # Initialize embeddings model

@@ -125,22 +125,35 @@ class ResearchAssistant:
             # Save the file
             file_path = self.pdf_processor.save_pdf(pdf_file)
             if not file_path:
+                logging.error("Failed to save PDF file")
                 return {"success": False, "message": "Failed to save PDF file"}
+
+            logging.info(f"PDF saved to {file_path}")
 
             # Extract metadata
             metadata = self.pdf_processor.extract_metadata(file_path)
+            logging.info(f"Extracted metadata: {metadata}")
 
-            # Store in database
+            # Extract full text
+            full_text = self.pdf_processor.extract_full_text(file_path)
+            logging.info(
+                f"Extracted full text (length: {len(full_text) if full_text else 0})")
+
+            # Store in database with full text
             paper_id = self.db.add_paper(
                 title=metadata["title"],
                 abstract=metadata["abstract"],
                 authors=metadata["authors"],
                 source="internal_upload",
-                file_path=file_path
+                file_path=file_path,
+                full_text=full_text
             )
+
+            logging.info(f"Added paper to database with ID: {paper_id}")
 
             # Extract documents using LangChain
             documents = self.pdf_processor.extract_documents(file_path)
+            logging.info(f"Extracted {len(documents)} document chunks")
 
             # Set document metadata
             for doc in documents:
@@ -151,14 +164,20 @@ class ResearchAssistant:
                 })
 
             # Add to vector store using LangChain documents
-            self.vector_store.add_documents(documents)
+            if documents:
+                ids = self.vector_store.add_documents(documents)
+                logging.info(f"Added {len(ids)} documents to vector store")
+            else:
+                logging.warning(
+                    "No document chunks extracted, skipping vector store")
 
             # Update session memory
             self.session_memory["uploaded_papers"].append({
                 "id": paper_id,
                 "title": metadata["title"],
                 "abstract": metadata["abstract"],
-                "path": file_path
+                "path": file_path,
+                "has_full_text": bool(full_text)
             })
 
             return {
@@ -166,12 +185,13 @@ class ResearchAssistant:
                 "paper_id": paper_id,
                 "title": metadata["title"],
                 "abstract": metadata["abstract"],
-                "authors": metadata["authors"]
+                "authors": metadata["authors"],
+                "full_text_length": len(full_text) if full_text else 0
             }
 
         except Exception as e:
-            logging.error(f"Error uploading paper: {e}")
-            return {"success": False, "message": str(e)}
+            logging.error(f"Error uploading paper: {str(e)}", exc_info=True)
+            return {"success": False, "message": f"Upload failed: {str(e)}"}
 
     def search_internal_papers(self, query: str) -> List[Dict]:
         """
@@ -462,4 +482,224 @@ class ResearchAssistant:
         if not paper:
             return {"error": "Paper not found"}
 
-        return self.agent.analyze_paper(paper["title"], paper["abstract"])
+        # Use full text if available, otherwise fall back to abstract
+        if paper.get("full_text"):
+            return self.agent.analyze_paper(paper["title"], paper["abstract"], paper["full_text"])
+        else:
+            return self.agent.analyze_paper(paper["title"], paper["abstract"])
+
+    def chat_with_paper(self, paper_id: int, query: str) -> Dict:
+        """
+        Have a RAG-based conversation with a specific paper.
+
+        Args:
+            paper_id: ID of the paper to chat with
+            query: User's question about the paper
+
+        Returns:
+            Dict with response and relevant source contexts
+        """
+        if not self.llm:
+            return {"error": "LLM not initialized", "response": "Language model not available. Please check your API key."}
+
+        try:
+            # Get paper info
+            paper = self.db.get_paper(paper_id)
+            if not paper:
+                return {"error": "Paper not found", "response": "Could not find the paper in the database."}
+
+            # Create a retriever for this specific paper
+            retriever = self.vector_store.db.as_retriever(
+                search_kwargs={"k": 3, "filter": {"doc_id": paper_id}}
+            )
+
+            # Get relevant chunks
+            docs = retriever.get_relevant_documents(query)
+
+            # If no chunks are found, try using stored full text if available
+            if not docs and paper.get('full_text'):
+                # Create a prompt that uses the stored full text
+                template = """You are an AI research assistant helping with questions about academic papers.
+                Answer the question based on the paper information provided below. If the information
+                needed to answer the question is not contained in the text, say "I don't have enough specific 
+                information about that in this paper."
+                
+                Paper Title: {title}
+                Paper Abstract: {abstract}
+                
+                Paper Full Text (excerpt):
+                {full_text}
+                
+                Question: {question}
+                """
+
+                # Truncate full text if it's too long
+                max_text_length = 30000
+                full_text = paper.get('full_text', '')
+                if len(full_text) > max_text_length:
+                    full_text = full_text[:max_text_length] + \
+                        "... [text truncated]"
+
+                prompt = ChatPromptTemplate.from_template(template)
+
+                chain = (
+                    {"title": lambda _: paper.get('title', "Unknown Paper"),
+                     "abstract": lambda _: paper.get('abstract', ""),
+                     "full_text": lambda _: full_text,
+                     "question": lambda x: x}
+                    | prompt
+                    | self.llm
+                    | StrOutputParser()
+                )
+
+                response = chain.invoke(query)
+
+                return {
+                    "response": response,
+                    "sources": [{"text": "Based on the full text of the paper", "metadata": {"note": "Using stored full text"}}]
+                }
+
+            # If no chunks found and no full text, fall back to using just metadata
+            elif not docs:
+                # Get the paper's full text if available but not stored in DB
+                full_text = ""
+                if paper.get('file_path') and os.path.exists(paper.get('file_path')):
+                    try:
+                        full_text = self.pdf_processor.extract_full_text(
+                            paper.get('file_path'))
+                    except Exception as e:
+                        logging.error(f"Error extracting full text: {e}")
+
+                # If we have some text to work with
+                if full_text:
+                    # Create a prompt that uses the paper title and abstract at minimum
+                    template = """You are an AI research assistant helping with questions about academic papers.
+                    
+                    Paper Title: {title}
+                    Paper Abstract: {abstract}
+                    
+                    You've been asked about this paper, but could only access limited information.
+                    Do your best to answer based on the title and abstract, and explain what might be needed for a more complete answer.
+                    
+                    Question: {question}
+                    """
+
+                    prompt = ChatPromptTemplate.from_template(template)
+
+                    chain = (
+                        {"title": lambda _: paper.get('title', "Unknown Paper"),
+                         "abstract": lambda _: paper.get('abstract', ""),
+                         "question": lambda x: x}
+                        | prompt
+                        | self.llm
+                        | StrOutputParser()
+                    )
+
+                    response = chain.invoke(query)
+
+                    return {
+                        "response": response,
+                        "sources": [{"text": paper.get('abstract', ""), "metadata": {"note": "Only abstract available"}}]
+                    }
+                else:
+                    # Minimal information case
+                    return {
+                        "response": f"I don't have enough information from '{paper.get('title')}' to answer your question. The paper may not have been fully processed or indexed correctly. Try uploading the paper again or reformulating your question.",
+                        "sources": []
+                    }
+
+            # If chunks found, create prompt for RAG with the retrieved documents
+            template = """You are an AI research assistant helping with questions about academic papers.
+            Answer the question based ONLY on the context provided below. If you don't know or the answer
+            is not in the context, say "I don't have enough information about that in this paper."
+            
+            Paper Title: {title}
+            
+            Context from the paper:
+            {context}
+            
+            Question: {question}
+            """
+
+            prompt = ChatPromptTemplate.from_template(template)
+
+            # Combine context from documents
+            contexts = [doc.page_content for doc in docs]
+            combined_context = "\n\n---\n\n".join(contexts)
+
+            # Create and execute RAG chain
+            chain = (
+                {"context": lambda _: combined_context,
+                 "question": lambda x: x,
+                 "title": lambda _: paper.get('title', "Unknown Paper")}
+                | prompt
+                | self.llm
+                | StrOutputParser()
+            )
+
+            response = chain.invoke(query)
+
+            return {
+                "response": response,
+                "sources": [{"text": doc.page_content, "metadata": doc.metadata} for doc in docs]
+            }
+
+        except Exception as e:
+            logging.error(f"Error in chat_with_paper: {e}")
+            return {"error": str(e), "response": f"Error processing your question: {str(e)}"}
+
+    def delete_paper(self, paper_id: int) -> Dict:
+        """
+        Delete a paper from the database and clean up associated resources.
+
+        Args:
+            paper_id: ID of the paper to delete
+
+        Returns:
+            Dict with success status and message
+        """
+        try:
+            # Delete from database and get file path
+            success, result = self.db.delete_paper(paper_id)
+
+            if not success:
+                return {"success": False, "message": result}
+
+            file_path = result
+
+            # Delete the associated PDF file if it exists
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logging.warning(f"Could not delete file {file_path}: {e}")
+
+            # Remove from vector store if present
+            try:
+                # Filter by doc_id to find and delete vector store entries for this paper
+                if self.vector_store and self.vector_store.db:
+                    # Get all documents and filter for the ones with this paper's ID
+                    docs = self.vector_store.db.get()
+                    if docs and "metadatas" in docs:
+                        ids_to_delete = []
+                        for i, metadata in enumerate(docs["metadatas"]):
+                            if metadata.get("doc_id") == paper_id:
+                                ids_to_delete.append(docs["ids"][i])
+
+                        # Delete the documents from vector store if any found
+                        if ids_to_delete:
+                            self.vector_store.db.delete(ids_to_delete)
+                            self.vector_store.db.persist()
+            except Exception as e:
+                logging.warning(f"Error cleaning up vector store entries: {e}")
+
+            # Update session memory to remove the paper if present
+            for i, paper in enumerate(self.session_memory["uploaded_papers"]):
+                if paper.get("id") == paper_id:
+                    self.session_memory["uploaded_papers"].pop(i)
+                    break
+
+            return {"success": True, "message": "Paper successfully deleted"}
+        except Exception as e:
+            logging.error(f"Error deleting paper: {e}")
+            return {"success": False, "message": str(e)}

@@ -2,13 +2,22 @@ import sqlite3
 import os
 import json
 import threading
+import logging
 from datetime import datetime
 
 
 class DatabaseManager:
-    def __init__(self, db_path="../data/papers.db"):
+    def __init__(self, db_path=None):
         """Initialize the database connection."""
-        self.db_path = db_path
+        if db_path is None:
+            # Use absolute path for consistency
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))
+            self.db_path = os.path.join(base_dir, "data", "papers.db")
+        else:
+            self.db_path = db_path
+
+        logging.info(f"Database path set to: {self.db_path}")
         self.ensure_db_directory()
         self._local = threading.local()
         self._initialize_connection()
@@ -45,13 +54,14 @@ class DatabaseManager:
             source TEXT,
             file_path TEXT,
             embedding_id TEXT,
+            full_text TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
 
         conn.commit()
 
-    def add_paper(self, title, abstract, authors=None, source="internal_upload", file_path=None, embedding_id=None):
+    def add_paper(self, title, abstract, authors=None, source="internal_upload", file_path=None, embedding_id=None, full_text=None):
         """Add a paper to the database."""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -59,9 +69,9 @@ class DatabaseManager:
         authors_json = json.dumps(authors) if authors else None
 
         cursor.execute('''
-        INSERT INTO papers (title, abstract, authors, source, file_path, embedding_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (title, abstract, authors_json, source, file_path, embedding_id))
+        INSERT INTO papers (title, abstract, authors, source, file_path, embedding_id, full_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (title, abstract, authors_json, source, file_path, embedding_id, full_text))
 
         conn.commit()
         return cursor.lastrowid
@@ -82,14 +92,14 @@ class DatabaseManager:
         return None
 
     def search_papers(self, keyword, limit=5):
-        """Search papers by keyword in title or abstract."""
+        """Search papers by keyword in title, abstract, or full text."""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute('''
         SELECT * FROM papers 
-        WHERE title LIKE ? OR abstract LIKE ?
+        WHERE title LIKE ? OR abstract LIKE ? OR full_text LIKE ?
         ORDER BY created_at DESC LIMIT ?
-        ''', (f'%{keyword}%', f'%{keyword}%', limit))
+        ''', (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', limit))
 
         papers = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -121,6 +131,38 @@ class DatabaseManager:
             results.append(paper_dict)
 
         return results
+
+    def delete_paper(self, paper_id):
+        """Delete a paper from the database.
+
+        Args:
+            paper_id: ID of the paper to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # First, get the paper to retrieve file path before deletion
+            cursor.execute(
+                'SELECT file_path FROM papers WHERE id = ?', (paper_id,))
+            result = cursor.fetchone()
+
+            if not result:
+                return False, "Paper not found"
+
+            file_path = result[0]
+
+            # Delete the paper from the database
+            cursor.execute('DELETE FROM papers WHERE id = ?', (paper_id,))
+            conn.commit()
+
+            return True, file_path
+        except Exception as e:
+            logging.error(f"Error deleting paper: {e}")
+            return False, str(e)
 
     def close(self):
         """Close the database connection."""

@@ -36,10 +36,10 @@ if 'assistant' not in st.session_state:
 # Helper functions
 
 
-def display_paper(paper, index=None):
+def display_paper(paper, index=None, allow_delete=False):
     """Display a paper in the UI."""
     with st.container():
-        col1, col2 = st.columns([9, 1])
+        col1, col2, col3 = st.columns([8, 1, 1])
 
         title = paper.get('title', 'Unknown Title')
 
@@ -56,6 +56,21 @@ def display_paper(paper, index=None):
                         "role": "assistant",
                         "content": f"## Analysis of '{title}'\n\n{analysis.get('analysis', 'Analysis failed')}"
                     })
+
+        with col3:
+            if allow_delete and paper.get('id'):
+                if st.button("Delete", key=f"delete_{hash(title)}", type="primary", help="Delete this paper permanently"):
+                    with st.spinner("Deleting paper..."):
+                        result = st.session_state.assistant.delete_paper(
+                            paper['id'])
+
+                    if result["success"]:
+                        st.success(f"Paper '{title}' deleted successfully")
+                        # Add a rerun call to refresh the page
+                        st.rerun()
+                    else:
+                        st.error(
+                            f"Failed to delete paper: {result['message']}")
 
         # Show authors if available
         authors = paper.get('authors', [])
@@ -163,8 +178,8 @@ with st.sidebar:
 
     # Navigation
     st.header("Navigation")
-    page = st.radio("Go to:", ["Chat Assistant",
-                    "Upload Papers", "Search Papers", "My Library"])
+    page = st.radio("Go to:", ["Chat Assistant", "Upload Papers",
+                    "Search Papers", "My Library", "Chat with Papers"])
 
 # Main area
 if page == "Chat Assistant":
@@ -240,26 +255,40 @@ elif page == "Upload Papers":
 
     if uploaded_file:
         with st.spinner("Processing paper..."):
-            result = st.session_state.assistant.upload_paper(uploaded_file)
+            try:
+                # Get file info for debugging
+                file_info = f"File: {uploaded_file.name}, Size: {uploaded_file.size} bytes, Type: {uploaded_file.type}"
+                logging.info(f"Processing uploaded file: {file_info}")
 
-        if result["success"]:
-            st.success(f"Successfully uploaded: {result['title']}")
+                # Ensure upload directory exists
+                os.makedirs(os.path.join(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__))), "data", "uploads"), exist_ok=True)
 
-            # Display paper details
-            st.subheader("Paper Details")
-            st.markdown(f"**Title:** {result['title']}")
-            st.markdown(
-                f"**Authors:** {', '.join(result['authors']) if result['authors'] else 'Unknown'}")
-            st.markdown(f"**Abstract:** {result['abstract']}")
+                # Process the paper
+                result = st.session_state.assistant.upload_paper(uploaded_file)
 
-            # Add to chat history
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": f"Paper '{result['title']}' has been uploaded and processed."
-            })
-        else:
-            st.error(
-                f"Failed to upload paper: {result.get('message', 'Unknown error')}")
+                if result["success"]:
+                    st.success(f"Successfully uploaded: {result['title']}")
+
+                    # Display paper details
+                    st.subheader("Paper Details")
+                    st.markdown(f"**Title:** {result['title']}")
+                    st.markdown(
+                        f"**Authors:** {', '.join(result['authors']) if result['authors'] else 'Unknown'}")
+                    st.markdown(f"**Abstract:** {result['abstract']}")
+
+                    # Add to chat history
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": f"Paper '{result['title']}' has been uploaded and processed."
+                    })
+                else:
+                    error_msg = result.get('message', 'Unknown error')
+                    st.error(f"Failed to upload paper: {error_msg}")
+                    logging.error(f"Upload failed: {error_msg}")
+            except Exception as e:
+                st.error(f"An error occurred during upload: {str(e)}")
+                logging.exception("Unexpected error during paper upload:")
 
 elif page == "Search Papers":
     st.header("Search for Research Papers")
@@ -357,10 +386,88 @@ elif page == "My Library":
     st.subheader(f"Your Papers ({len(papers)})")
     if papers:
         for i, paper in enumerate(papers):
-            display_paper(paper, i)
+            display_paper(paper, i, allow_delete=True)
     else:
         st.info("No papers in your library yet. Try uploading or searching for papers.")
 
     # Paper comparison tool
     st.markdown("---")
     display_comparison_selector()
+
+elif page == "Chat with Papers":
+    st.header("Chat with Papers")
+
+    # Get all papers from the database
+    papers = st.session_state.assistant.db.get_all_papers()
+
+    if not papers:
+        st.info("Your library is empty. Please upload some papers first.")
+    else:
+        # Paper selector
+        selected_paper = st.selectbox(
+            "Select a paper to chat with:",
+            options=papers,
+            format_func=lambda p: p.get('title', 'Unknown Title')
+        )
+
+        if selected_paper:
+            st.write("### Selected Paper")
+            display_paper(selected_paper, allow_delete=True)
+
+            # Chat interface
+            st.write("### Chat")
+
+            # Initialize paper-specific chat history in session state if not exists
+            paper_chat_key = f"paper_chat_{selected_paper['id']}"
+            if paper_chat_key not in st.session_state:
+                st.session_state[paper_chat_key] = []
+
+            # Display paper-specific chat history
+            for message in st.session_state[paper_chat_key]:
+                role = message["role"]
+                content = message["content"]
+
+                if role == "user":
+                    st.markdown(f"**You:** {content}")
+                else:
+                    with st.container():
+                        st.markdown(f"**Assistant:** {content}")
+                        # If the message has sources, display them in an expander
+                        if "sources" in message:
+                            with st.expander("View sources from paper"):
+                                for source in message["sources"]:
+                                    st.markdown(f"```\n{source['text']}\n```")
+                                    if "metadata" in source:
+                                        st.markdown(
+                                            f"*Page {source['metadata'].get('page', 'unknown')}*")
+
+            # Chat input
+            question = st.chat_input(
+                f"Ask a question about '{selected_paper['title']}'...")
+
+            if question:
+                # Add user question to history
+                st.session_state[paper_chat_key].append({
+                    "role": "user",
+                    "content": question
+                })
+
+                # Get response using RAG
+                with st.spinner("Searching paper and generating response..."):
+                    response = st.session_state.assistant.chat_with_paper(
+                        selected_paper['id'],
+                        question
+                    )
+
+                if "error" in response:
+                    st.error(response["error"])
+                else:
+                    # Add assistant response with sources to history
+                    st.session_state[paper_chat_key].append({
+                        "role": "assistant",
+                        "content": response["response"],
+                        "sources": response.get("sources", [])
+                    })
+
+                # Rerun to update the chat display
+                st.rerun()

@@ -99,21 +99,34 @@ If you need to use a tool, output it in the format: <tool>tool_name(parameters)<
         if not self.llm or not self.api_key:
             return {"error": "Gemini API not configured"}
 
+        # Include full text in analysis if available
+        content = f"Title: {title}\n\nAbstract: {abstract}"
+
+        if full_text:
+            # If we have full text, provide a comprehensive section of it to the model
+            # Limit the length to avoid token limits
+            max_text_length = 30000  # Adjust based on model's context window
+            truncated_text = full_text[:max_text_length]
+            if len(full_text) > max_text_length:
+                truncated_text += "... [text truncated]"
+
+            content += f"\n\nFull Text Excerpt:\n{truncated_text}"
+
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(
                 content="You are a research paper analysis assistant that extracts key information from papers."),
             HumanMessage(content=f"""Analyze the following research paper and extract key information:
-Title: {title}
-
-Abstract: {abstract}
+{content}
 
 Please provide:
 1. Research problem/question
 2. Key methods
 3. Main contributions
-4. 3-5 keywords
+4. Findings and conclusions
+5. 3-5 keywords
+6. Implications for the field
 
-Format your response as a structured report.
+Format your response as a structured report with clear headings.
 """)
         ])
 
@@ -142,26 +155,46 @@ Format your response as a structured report.
         if not self.llm or not self.api_key:
             return "Gemini API not configured. Please add your API key."
 
+        # Prepare content for paper 1
+        paper1_content = f"Title: {paper1.get('title', 'Unknown')}\nAbstract: {paper1.get('abstract', 'Not available')}"
+        if paper1.get('full_text'):
+            # Limit the length to prevent token overflow
+            max_text_length = 15000  # Reduced size to accommodate both papers
+            truncated_text = paper1.get('full_text')[:max_text_length]
+            if len(paper1.get('full_text', '')) > max_text_length:
+                truncated_text += "... [text truncated]"
+            paper1_content += f"\n\nFull Text Excerpt:\n{truncated_text}"
+
+        # Prepare content for paper 2
+        paper2_content = f"Title: {paper2.get('title', 'Unknown')}\nAbstract: {paper2.get('abstract', 'Not available')}"
+        if paper2.get('full_text'):
+            # Limit the length to prevent token overflow
+            max_text_length = 15000  # Reduced size to accommodate both papers
+            truncated_text = paper2.get('full_text')[:max_text_length]
+            if len(paper2.get('full_text', '')) > max_text_length:
+                truncated_text += "... [text truncated]"
+            paper2_content += f"\n\nFull Text Excerpt:\n{truncated_text}"
+
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(
-                content="You are a research paper comparison assistant."),
-            HumanMessage(content=f"""Compare the following two research papers:
+                content="You are a research paper comparison assistant with expertise in analyzing academic papers."),
+            HumanMessage(content=f"""Compare the following two research papers based on all provided information:
 
 Paper 1:
-Title: {paper1.get('title', 'Unknown')}
-Abstract: {paper1.get('abstract', 'Not available')}
+{paper1_content}
 
 Paper 2:
-Title: {paper2.get('title', 'Unknown')}
-Abstract: {paper2.get('abstract', 'Not available')}
+{paper2_content}
 
 Please provide a structured comparison including:
-1. Research goals
-2. Methodologies
-3. Key contributions
-4. Strengths and weaknesses
-5. Similarities between the papers
-6. Major differences
+1. Research goals and objectives
+2. Methodologies and approaches
+3. Key contributions and innovations
+4. Main findings and results
+5. Strengths and limitations of each paper
+6. Significant similarities between the papers
+7. Important differences and contrasting aspects
+8. Recommendations for which paper might be more relevant for different research contexts
 
 Format your response as a structured report with clear headings and bullet points.
 """)
