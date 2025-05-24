@@ -314,11 +314,12 @@ elif page == NavigationType.UPLOAD_PAPERS.value:
                     st.success(f"Successfully uploaded: {result['title']}")
 
                     # Display paper details
-                    st.subheader("Paper Details")
-                    st.markdown(f"**Title:** {result['title']}")
-                    st.markdown(
-                        f"**Authors:** {', '.join(result['authors']) if result['authors'] else 'Unknown'}")
-                    st.markdown(f"**Abstract:** {result['abstract']}")
+                    with st.container(key="paper_detail", border=True):
+                        st.subheader("Paper Details")
+                        st.markdown(f"**Title:** {result['title']}")
+                        st.markdown(
+                            f"**Authors:** {', '.join(result['authors']) if result['authors'] else 'Unknown'}")
+                        st.markdown(f"**Abstract:** {result['abstract']}")
 
                     # Add to chat history
                     st.session_state.chat_history.append(

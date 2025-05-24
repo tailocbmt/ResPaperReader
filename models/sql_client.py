@@ -77,11 +77,10 @@ class SQLClient:
         cursor = conn.cursor()
 
         authors = json.dumps(authors) if authors else None
-
         cursor.execute(
             '''
                 INSERT INTO papers (title, abstract, authors, source, url_path, embedding_id, full_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s);
             ''',
             (title, abstract, authors, source, file_path, embedding_id, full_text)
         )
@@ -96,7 +95,7 @@ class SQLClient:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            'SELECT * FROM papers WHERE id = ?;',
+            'SELECT * FROM papers WHERE id = %s;',
             (paper_id)
         )
         paper = cursor.fetchone()
@@ -121,12 +120,12 @@ class SQLClient:
         if keyword:
             query = f'''
                     {query}
-                    WHERE title LIKE ? OR abstract LIKE ? OR full_text LIKE ?        
+                    WHERE title LIKE %s OR abstract LIKE %s OR full_text LIKE %s        
                 '''
 
         cursor.execute(f'''
             {query}
-            ORDER BY created_at DESC LIMIT ?;
+            ORDER BY created_at DESC LIMIT %s;
             ''', (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', limit)
         )
 
@@ -155,7 +154,7 @@ class SQLClient:
             cursor = conn.cursor()
 
             cursor.execute(
-                'SELECT id FROM papers WHERE id = ?;',
+                'SELECT id FROM papers WHERE id = %s;',
                 (paper_id)
             )
             result = cursor.fetchall()
@@ -164,7 +163,7 @@ class SQLClient:
                 return False, "Paper not found"
 
             cursor.execute(
-                'DELETE FROM papers WHERE id = ?;',
+                'DELETE FROM papers WHERE id = %s;',
                 (paper_id)
             )
             conn.commit()

@@ -118,9 +118,9 @@ class ResearchAssistant:
             meta = self.pdf.extract_metadata(path)
             content = self.pdf.extract_full_text(path)
 
-            paper_id = self.db.add_paper(
+            paper_id = self.db.insert_paper(
                 title=meta["title"], abstract=meta["abstract"], authors=meta["authors"],
-                source=PaperSource.USER.value, url_path=path, full_text=content
+                source=PaperSource.USER.value, file_path=path, full_text=content
             )
 
             docs = self.pdf.extract_documents(path)
