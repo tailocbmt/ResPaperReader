@@ -74,7 +74,7 @@ class PaperSource(Enum):
 class LLMSource(Enum):
     GEMINI = "gemini"
     MISTRAL = "mistral"
-    LLAMA2 = "llama2"
+    LLAMA2 = "llama3"
 
 
 class WebSearchSource(Enum):
