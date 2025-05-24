@@ -1,4 +1,5 @@
 import base64
+import uuid
 import streamlit as st
 import os
 import sys
@@ -52,7 +53,7 @@ def display_paper(paper, index=None, allow_delete=False):
             st.markdown(f"### {index+1 if index is not None else ''}) {title}")
 
         with col2:
-            if st.button("Analyze", key=f"analyze_{hash(title)}"):
+            if st.button("Analyze", key=f"analyze_{uuid.uuid4()}"):
                 if paper.get('id'):
                     with st.spinner("Analyzing paper..."):
                         analysis = st.session_state.assistant.analyze_paper(
@@ -67,7 +68,7 @@ def display_paper(paper, index=None, allow_delete=False):
 
         with col3:
             if allow_delete and paper.get('id'):
-                if st.button("Delete", key=f"delete_{hash(title)}", type="primary", help="Delete this paper permanently"):
+                if st.button("Delete", key=f"delete_{uuid.uuid4()}", type="primary", help="Delete this paper permanently"):
                     with st.spinner("Deleting paper..."):
                         result = st.session_state.assistant.delete_paper(
                             paper['id'])
@@ -150,19 +151,25 @@ def display_comparison_selector():
             paper1_id = papers[paper1_idx].get('id', str(paper1_idx))
             paper2_id = papers[paper2_idx].get('id', str(paper2_idx))
 
-            comparison = st.session_state.assistant.paper_comparison(
-                paper_id_1=paper1_id,
-                paper_id_2=paper2_id
+            comparison = st.session_state.assistant.compare_papers(
+                paper_1=papers[paper1_idx],
+                paper_2=papers[paper2_idx]
             )
 
             # Add to chat history
             title1 = papers[paper1_idx].get('title', f"Paper {paper1_idx+1}")
             title2 = papers[paper2_idx].get('title', f"Paper {paper2_idx+1}")
 
+            if comparison:
+                with st.container(key="comparison_detail", border=True):
+                    st.subheader("Comparison Details")
+                    st.markdown(
+                        f"Comparison: '{title1}' vs '{title2}'\n\n{comparison}")
+
             st.session_state.chat_history.append(
                 {
                     "role": "assistant",
-                    "content": f"## Comparison: '{title1}' vs '{title2}'\n\n{comparison}"
+                    "content": f"Comparison: '{title1}' vs '{title2}'\n\n{comparison}"
                 }
             )
 
@@ -210,7 +217,7 @@ if page == NavigationType.CHAT_ASSISTANT.value:
             st.markdown(f"**{prefix_str}:** {content}")
 
     # Input for new messages
-    user_input = st.chat_input("Ask something")
+    user_input = st.chat_input("Ask something", key="chat assistant")
 
     if user_input:
         # Add user message to history
@@ -344,12 +351,12 @@ elif page == NavigationType.SEARCH_PAPERS.value:
         ["Internal Search", "Web Search", "Conference Search"])
 
     with tab1:
-        st.subheader("Search Internal Library")
+        st.subheader("Internal Library")
         query = st.text_input("Enter search terms:", key="internal_search")
 
-        if st.button("Search Internal Library"):
+        if st.button("Search", key='internal_button'):
             with st.spinner("Searching internal database..."):
-                results = st.session_state.assistant.search_internal_papers(
+                results = st.session_state.assistant.search_internal(
                     query)
 
             st.session_state.current_papers = results
@@ -362,7 +369,7 @@ elif page == NavigationType.SEARCH_PAPERS.value:
                 st.info("No papers found. Try uploading papers first.")
 
     with tab2:
-        st.subheader("Search External Sources")
+        st.subheader("Search External Source")
         col1, col2 = st.columns([3, 1])
 
         with col1:
@@ -379,9 +386,9 @@ elif page == NavigationType.SEARCH_PAPERS.value:
                 format_func=lambda x: x.capitalize()
             )
 
-        if st.button("Search External Sources"):
+        if st.button("Search", key='external_button'):
             with st.spinner("Searching external sources..."):
-                results = st.session_state.assistant.search_web_papers(
+                results = st.session_state.assistant.search_web(
                     query, source)
 
             st.session_state.current_papers = results
@@ -404,12 +411,12 @@ elif page == NavigationType.SEARCH_PAPERS.value:
         with col2:
             year = st.text_input("Year (optional):")
 
-        if st.button("Search Conference Papers"):
+        if st.button("Search", key='conference_button'):
             if not conference:
                 st.warning("Please enter a conference name.")
             else:
                 with st.spinner(f"Searching for papers from {conference}..."):
-                    results = st.session_state.assistant.search_conference_papers(
+                    results = st.session_state.assistant.search_conference(
                         conference, year)
 
                 st.session_state.current_papers = results
@@ -425,30 +432,11 @@ elif page == NavigationType.SEARCH_PAPERS.value:
     st.markdown("---")
     display_comparison_selector()
 
-elif page == NavigationType.PAPER_DATABASE.value:
-    st.header("Paper Database")
-
-    with st.spinner("Loading database..."):
-        papers = st.session_state.assistant.db.get_all_papers()
-
-    st.session_state.current_papers = papers
-
-    st.subheader(f"Your Papers ({len(papers)})")
-    if papers:
-        for i, paper in enumerate(papers):
-            display_paper(paper, i, allow_delete=True)
-    else:
-        st.info("No papers in your library yet. Try uploading or searching for papers.")
-
-    # Paper comparison tool
-    st.markdown("---")
-    display_comparison_selector()
-
 elif page == NavigationType.CHAT_WITH_PAPERS.value:
     st.header("Ask about Papers")
 
     # Get all papers from the database
-    papers = st.session_state.assistant.db.get_all_papers()
+    papers = st.session_state.assistant.db.get_papers()
 
     if not papers:
         st.info("Your library is empty. Please upload some papers first.")
@@ -493,8 +481,8 @@ elif page == NavigationType.CHAT_WITH_PAPERS.value:
 
             # Chat input
             question = st.chat_input(
-                f"Ask questions about '{selected_paper['title']}'...")
-
+                f"Ask questions about '{selected_paper['title']}'...", key="chat paper")
+            logging.error(question)
             if question:
                 # Add user question to history
                 st.session_state[paper_chat_key].append(
@@ -503,7 +491,6 @@ elif page == NavigationType.CHAT_WITH_PAPERS.value:
                         "content": question
                     }
                 )
-
                 # Get response using RAG
                 with st.spinner("Generating response..."):
                     response = st.session_state.assistant.chat_with_paper(

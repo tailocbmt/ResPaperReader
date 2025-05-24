@@ -58,7 +58,7 @@ class WebSearchManager:
     def search_semantic_scholar(
         self,
         query: str,
-        limit: int = 5
+        limit: int = 2
     ) -> List[Dict]:
         """
         Search for papers on Semantic Scholar.
@@ -74,15 +74,15 @@ class WebSearchManager:
             papers = []
 
             # Use the Semantic Scholar API
-            results = self.client.search_paper(query, limit=limit)
+            results = self.semantic_client.search_paper(query, limit=limit)
             time.sleep(self.rate_limit_delay)  # Respect rate limits
 
-            for paper in results:
+            for paper in results[:limit]:
                 # Get more details for this paper
-                if paper.get('paperId'):
+                if paper.paperId:
                     try:
                         details = self.semantic_client.get_paper(
-                            paper.get('paperId')
+                            paper.paperId
                         )
 
                         time.sleep(self.rate_limit_delay)
@@ -94,12 +94,12 @@ class WebSearchManager:
 
                 papers.append(
                     {
-                        'title': details.get('title', 'Unknown Title'),
-                        'abstract': details.get('abstract', ''),
-                        'authors': [author.get('name', 'Unknown') for author in details.get('authors', [])],
-                        'url': f"https://www.semanticscholar.org/paper/{details.get('paperId', '')}" if details.get('paperId') else None,
+                        'title': details.title,
+                        'abstract': details.abstract,
+                        'authors': [author.name for author in details.authors],
+                        'url': f"https://www.semanticscholar.org/paper/{details.paperId}" if details.paperId else None,
                         'source': WebSearchSource.SEMANTIC_SCHOLAR.value,
-                        'year': details.get('year')
+                        'year': details.year
                     }
                 )
 

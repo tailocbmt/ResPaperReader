@@ -96,7 +96,7 @@ class SQLClient:
         cursor = conn.cursor()
         cursor.execute(
             'SELECT * FROM papers WHERE id = %s;',
-            (paper_id)
+            (str(paper_id))
         )
         paper = cursor.fetchone()
 
@@ -117,16 +117,21 @@ class SQLClient:
         conn = self._get_connection()
         cursor = conn.cursor()
         query = 'SELECT * FROM papers'
+        params = tuple()
         if keyword:
             query = f'''
                     {query}
                     WHERE title LIKE %s OR abstract LIKE %s OR full_text LIKE %s        
                 '''
+            params = (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%')
 
-        cursor.execute(f'''
-            {query}
-            ORDER BY created_at DESC LIMIT %s;
-            ''', (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', limit)
+        params = params + (limit,)
+        cursor.execute(
+            f'''
+                {query}
+                ORDER BY created_at DESC LIMIT %s;
+            ''',
+            params
         )
 
         papers = cursor.fetchall()

@@ -3,7 +3,8 @@ import logging
 from typing import List, Dict, Any, Optional
 
 # LangChain imports
-from langchain_community.vectorstores import Chroma
+import chromadb
+from langchain_chroma.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
@@ -32,7 +33,12 @@ class VectorStore:
         try:
             self.embedding_model = HuggingFaceEmbeddings(
                 model_name=embedding_model_id)
+            persistent_client = chromadb.PersistentClient(path=self.store_dir)
+
             self.db_client = Chroma(
+                client=persistent_client,
+                collection_name="persist",
+                client_settings=chromadb.config.Settings(is_persistent=True),
                 persist_directory=self.store_dir,
                 embedding_function=self.embedding_model
             )
@@ -67,7 +73,6 @@ class VectorStore:
             document = Document(page_content=document_text, metadata=metadata)
             added_ids = self.db_client.add_documents(
                 [document], ids=[str(document_id)])
-            self.db_client.persist()
 
             return True, added_ids[0]
         except Exception as e:
@@ -124,8 +129,8 @@ class VectorStore:
 
             ids = [str(doc.metadata.get("doc_id", i))
                    for i, doc in enumerate(document_list)]
-            self.db_client.add_documents(document_list, ids=ids)
-            self.db_client.persist()
+
+            ids = self.db_client.add_documents(document_list)
             return ids
         except Exception as e:
             logging.error(f"Error adding documents: {e}")

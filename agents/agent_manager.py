@@ -116,7 +116,6 @@ class AgentManager:
                     content=system_msg),
                 HumanMessage(
                     content=human_msg)
-
             ]
         )
 

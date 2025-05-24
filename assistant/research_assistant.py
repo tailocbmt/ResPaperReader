@@ -147,7 +147,7 @@ class ResearchAssistant:
             return {"success": False, "message": f"Upload failed: {str(e)}"}
 
     def search_internal(self, query: str) -> List[Dict]:
-        matches = self.vector.search(query=query, top_k=3)
+        matches = self.vector.search(query_text=query, top_k=3)
         results = []
         for m in matches:
             if m.get('doc_id'):
@@ -178,7 +178,7 @@ class ResearchAssistant:
         report = self.llm_agent.run_paper_comparison(
             paper1=paper_1, paper2=paper_2)
         self.session["last_comparison"] = {
-            "papers": [paper_1, paper_2], "report": report}
+            "papers": [paper_1.get('id'), paper_2.get('id')], "report": report}
         return report
 
     def _legacy_process_query(self, user_query: str) -> Dict:
@@ -275,11 +275,9 @@ class ResearchAssistant:
             paper_record = self.db.get_paper_by_id(paper_id)
             if not paper_record:
                 return {"error": "Paper not found", "response": "Could not find the paper in the database."}
-
-            retriever = self.vector.db.as_retriever(
+            retriever = self.vector.db_client.as_retriever(
                 search_kwargs={"k": 3, "filter": {"doc_id": paper_id}})
             matched_chunks = retriever.get_relevant_documents(user_question)
-
             template = self.prompts.get(
                 "chat_with_paper", {})
             full_text_msg = template.get(

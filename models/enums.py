@@ -63,7 +63,6 @@ class NavigationType(Enum):
     CHAT_ASSISTANT = "Chat Assistant"
     UPLOAD_PAPERS = "Upload Papers"
     SEARCH_PAPERS = "Search Papers"
-    PAPER_DATABASE = "Paper Database"
     CHAT_WITH_PAPERS = "Chat with Papers"
 
 

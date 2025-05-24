@@ -6,7 +6,7 @@ scikit-learn
 requests
 aiohttp
 faiss-cpu==1.9.0
-numpy
+numpy<2
 pandas
 sentence-transformers
 python-dotenv
