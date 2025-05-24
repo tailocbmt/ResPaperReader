@@ -36,7 +36,8 @@ class AgentManager:
         if llm_name == LLMSource.GEMINI.name:
             return ChatGoogleGenerativeAI(
                 model="gemini-2.0-flash",
-                temperature=temperature
+                temperature=temperature,
+                google_api_key=self.api_key
             )
         elif llm_name in {LLMSource.MISTRAL.name, LLMSource.LLAMA2.name}:
             return ChatOllama(
