@@ -33,13 +33,14 @@ class AgentManager:
         self.system_prompts = load_prompts()
 
     def load_llm(self, llm_name: str, temperature: float = 0.3):
-        if llm_name == LLMSource.GEMINI.name:
+
+        if llm_name == LLMSource.GEMINI.value:
             return ChatGoogleGenerativeAI(
                 model="gemini-2.0-flash",
                 temperature=temperature,
-                google_api_key=self.api_key
+                google_api_key=self.google_api_key
             )
-        elif llm_name in {LLMSource.MISTRAL.name, LLMSource.LLAMA2.name}:
+        elif llm_name in {LLMSource.MISTRAL.value, LLMSource.LLAMA2.value}:
             return ChatOllama(
                 model=llm_name,
                 temperature=temperature

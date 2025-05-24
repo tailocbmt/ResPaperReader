@@ -93,6 +93,8 @@ class ResearchAssistant:
             prompt = ChatPromptTemplate.from_messages(
                 [
                     SystemMessage(content=system_msg),
+                    MessagesPlaceholder(variable_name="tools"),
+                    MessagesPlaceholder(variable_name="tool_names"),
                     MessagesPlaceholder(variable_name="chat_history"),
                     HumanMessage(content=human_msg),
                     MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -226,6 +228,8 @@ class ResearchAssistant:
                 "recent_searches": [p.get("title") for p in self.session["search_results"]]
             }
             prompt_input = f"{user_query}\n\nContext: {json.dumps(context_bundle)}"
+            prompt_input
+            logging.error(f"PROMPT INPUTTT: {prompt_input}")
             agent_output = self.agent_executor.invoke(
                 {"input": prompt_input, "chat_history": []})
             message_text = agent_output["output"]
@@ -237,9 +241,16 @@ class ResearchAssistant:
                     if isinstance(step[1], list) and step[1]
                 ]
                 if tool_execs:
-                    return {"action": "tool_results", "results": tool_execs, "message": message_text}
+                    return {
+                        "action": "tool_results",
+                        "results": tool_execs,
+                        "message": message_text
+                    }
 
-            return {"action": "response", "message": message_text}
+            return {
+                "action": "response",
+                "message": message_text
+            }
 
         except Exception as e:
             logging.error(f"LangChain agent error: {e}")

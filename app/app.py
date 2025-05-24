@@ -29,7 +29,7 @@ if 'assistant' not in st.session_state:
     api_key = os.environ.get("GEMINI_API_KEY", "")
 
     # Initialize the research assistant
-    st.session_state.llm_name = LLMSource.GEMINI.name
+    st.session_state.llm_name = LLMSource.GEMINI.value
     st.session_state.assistant = ResearchAssistant(
         gemini_api_key=api_key,
         llm_name=st.session_state.llm_name
