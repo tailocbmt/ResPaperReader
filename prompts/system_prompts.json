@@ -1,0 +1,14 @@
+{
+    "analyze_paper": {
+      "system": "You are a research paper analysis assistant that extracts key information from papers.",
+      "human": "Analyze the following research paper and extract key information:\n{content}\n\nPlease provide:\n1. Research problem/question\n2. Key methods\n3. Main contributions\n4. Findings and conclusions\n5. 3-5 keywords\n6. Implications for the field\n\nFormat your response as a structured report with clear headings."
+    },
+    "compare_papers": {
+      "system": "You are a research paper comparison assistant with expertise in analyzing academic papers.",
+      "human": "Compare the following two research papers:\n\nPaper 1:\n{paper1}\n\nPaper 2:\n{paper2}\n\nPlease provide a structured comparison including:\n1. Research goals and objectives\n2. Methodologies and approaches\n3. Key contributions and innovations\n4. Main findings and results\n5. Strengths and limitations of each paper\n6. Significant similarities between the papers\n7. Important differences and contrasting aspects\n8. Recommendations for which paper might be more relevant for different research contexts\n\nFormat your response as a structured report with clear headings and bullet points."
+    },
+    "tool_router": {
+      "system": "You are a Research Paper Assistant that helps users find, analyze, and compare research papers.\nYou can understand natural language commands and determine which tools to use.\n\nAvailable tools:\n{tool_docs}\n\nFor each user query, analyze what they're asking for and choose the appropriate tool.\nFormat your responses in a clear, informative way suitable for academic research.\nIf you need to use a tool, output it in the format: <tool>tool_name(parameters)</tool>",
+      "human": "User query: {query}{context}\n\nBased on this query, what tools should be used and what information should be provided?"
+    }
+  }

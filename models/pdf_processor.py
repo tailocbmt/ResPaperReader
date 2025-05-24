@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import logging
 import re
 from datetime import datetime
@@ -9,12 +10,12 @@ import os.path
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 
-# Keep pdfplumber for backward compatibility
-import pdfplumber
-
 
 class PDFProcessor:
-    def __init__(self, upload_dir=None):
+    def __init__(
+        self,
+        upload_dir=None
+    ):
         """Initialize PDF processor with upload directory."""
         if upload_dir is None:
             # Use absolute path for consistency
@@ -27,119 +28,78 @@ class PDFProcessor:
         logging.info(f"PDF uploads directory set to: {self.upload_dir}")
         os.makedirs(self.upload_dir, exist_ok=True)
 
-    def save_pdf(self, pdf_file):
-        """
-        Save an uploaded PDF file.
-
-        Args:
-            pdf_file: File object from Streamlit
-
-        Returns:
-            Path to the saved file
-        """
+    def save_pdf(
+            self,
+            uploaded_file: str):
+        """Save an uploaded PDF file and return its path."""
         try:
-            # Generate a unique filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{timestamp}_{pdf_file.name}"
-            file_path = os.path.join(self.upload_dir, filename)
+            unique_filename = f"{timestamp}_{uploaded_file.name}"
+            destination_path = os.path.join(self.upload_dir, unique_filename)
 
-            # Save the file
-            with open(file_path, "wb") as f:
-                f.write(pdf_file.getbuffer())
+            with open(destination_path, "wb") as out_file:
+                out_file.write(uploaded_file.getbuffer())
 
-            return file_path
+            return destination_path
         except Exception as e:
             logging.error(f"Error saving PDF: {e}")
             return None
 
-    def extract_metadata(self, file_path: str) -> Dict:
-        """
-        Extract title, abstract, and authors from a PDF file using LangChain.
+    def _extract_abstract(self, text: str) -> str:
+        """Internal helper to extract abstract section."""
+        abstract_search = re.search(
+            r'(?:Abstract|ABSTRACT)[\s\.\:\-]*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z][a-z])',
+            text, re.IGNORECASE)
+        return abstract_search.group(1).strip() if abstract_search else ""
 
-        Args:
-            file_path: Path to the PDF file
+    def _extract_authors(self, text: str) -> List[str]:
+        """Internal helper to extract author list."""
+        author_search = re.search(
+            r'(?:^|\n)([^,\n]+(?:,\s*[^,\n]+)*)\n(?:[^@\n]*@[^@\n]*|[Aa]bstract)',
+            text)
+        if author_search:
+            return [a.strip() for a in author_search.group(1).split(',')]
+        return []
 
-        Returns:
-            Dict containing title, abstract, and authors
-        """
+    def extract_metadata(self, pdf_path: str) -> Dict:
+        """Extract title, abstract, and authors from a PDF file."""
         try:
-            # Use LangChain's PyPDFLoader
-            loader = PyPDFLoader(file_path)
-            documents = loader.load()
+            documents = PyPDFLoader(pdf_path).load()
+            page_text_combined = "\n".join(
+                doc.page_content for doc in documents[:2])
+            lines = [line.strip()
+                     for line in page_text_combined.splitlines() if line.strip()]
 
-            # Get text from the first 2 pages which typically contain metadata
-            text = ""
-            for doc in documents[:2]:
-                text += doc.page_content + "\n"
-
-            # Extract title (assume first line with significant text)
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
             title = lines[0] if lines else "Unknown Title"
-
-            # Look for abstract section
-            abstract = ""
-            abstract_match = re.search(
-                r'(?:Abstract|ABSTRACT)[\s\.\:\-]*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z][a-z])', text, re.IGNORECASE)
-            if abstract_match:
-                abstract = abstract_match.group(1).strip()
-
-            # Extract author information
-            authors = []
-            author_section = re.search(
-                r'(?:^|\n)([^,\n]+(?:,\s*[^,\n]+)*)\n(?:[^@\n]*@[^@\n]*|[Aa]bstract)', text)
-            if author_section:
-                author_text = author_section.group(1).strip()
-                authors = [a.strip() for a in author_text.split(',')]
+            abstract_text = self._extract_abstract(page_text_combined)
+            author_list = self._extract_authors(page_text_combined)
 
             return {
                 "title": title,
-                "abstract": abstract,
-                "authors": authors
+                "abstract": abstract_text,
+                "authors": author_list
             }
         except Exception as e:
             logging.error(f"Error extracting metadata from PDF: {e}")
             return {
-                "title": os.path.basename(file_path),
+                "title": os.path.basename(pdf_path),
                 "abstract": "",
                 "authors": []
             }
 
-    def extract_full_text(self, file_path: str) -> str:
-        """
-        Extract full text from a PDF using LangChain.
-
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            Full text content of the PDF
-        """
+    def extract_full_text(self, pdf_path: str) -> str:
+        """Extract all text from PDF using LangChain."""
         try:
-            # Use LangChain's PyPDFLoader
-            loader = PyPDFLoader(file_path)
-            documents = loader.load()
-
-            # Combine text from all documents/pages
-            text = "\n\n".join([doc.page_content for doc in documents])
-            return text
+            docs = PyPDFLoader(pdf_path).load()
+            return "\n\n".join(doc.page_content for doc in docs)
         except Exception as e:
             logging.error(f"Error extracting full text: {e}")
             return ""
 
-    def extract_documents(self, file_path: str) -> List[Document]:
-        """
-        Extract pages as LangChain Documents from a PDF.
-
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            List of LangChain Document objects
-        """
+    def extract_documents(self, pdf_path: str) -> List[Document]:
+        """Extract PDF pages as LangChain Document objects."""
         try:
-            loader = PyPDFLoader(file_path)
-            return loader.load()
+            return PyPDFLoader(pdf_path).load()
         except Exception as e:
-            logging.error(
-                f"Error loading document as LangChain Documents: {e}")
+            logging.error(f"Error loading PDF documents: {e}")
             return []

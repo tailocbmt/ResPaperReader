@@ -4,7 +4,7 @@ pdfplumber
 scikit-learn
 requests
 aiohttp
-faiss-cpu
+faiss-cpu==1.9.0
 numpy
 pandas
 sentence-transformers
@@ -17,3 +17,4 @@ langchain-core>=0.1.0
 langchain-google-genai>=0.0.5
 pypdf
 chromadb
+ollama
